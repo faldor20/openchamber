@@ -157,9 +157,9 @@ const persistSessionSelectionMap = (map: SessionSelectionMap) => {
     _pendingSelectionMap = map;
     clearTimeout(_persistSelectionTimer);
     _persistSelectionTimer = setTimeout(() => {
-        _pendingSelectionMap = null;
         try {
             safeStorage.setItem(SESSION_SELECTION_STORAGE_KEY, JSON.stringify(map));
+            _pendingSelectionMap = null;
         } catch { /* ignored */ }
     }, 300);
 };
