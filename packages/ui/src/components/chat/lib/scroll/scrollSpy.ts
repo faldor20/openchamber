@@ -199,6 +199,8 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
             }
         }
 
+        clearTimeout(roDebounce);
+        roDebounce = undefined;
         ro?.disconnect();
         ro = undefined;
         if (CtorRO) {
