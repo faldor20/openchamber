@@ -192,11 +192,11 @@ const persistFolders = (foldersMap: SessionFoldersMap): void => {
   _pendingFoldersMap = foldersMap;
   clearTimeout(_persistFoldersTimer);
   _persistFoldersTimer = setTimeout(() => {
-    _pendingFoldersMap = null;
     try {
       safeStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(foldersMap));
+      _pendingFoldersMap = null;
     } catch {
-      // ignored
+      // ignored; keep _pendingFoldersMap so a later flush can retry
     }
   }, 300);
 };
@@ -205,11 +205,11 @@ const persistCollapsed = (collapsedFolderIds: Set<string>): void => {
   _pendingCollapsedIds = collapsedFolderIds;
   clearTimeout(_persistCollapsedTimer);
   _persistCollapsedTimer = setTimeout(() => {
-    _pendingCollapsedIds = null;
     try {
       safeStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify(Array.from(collapsedFolderIds)));
+      _pendingCollapsedIds = null;
     } catch {
-      // ignored
+      // ignored; keep _pendingCollapsedIds so a later flush can retry
     }
   }, 300);
 };
