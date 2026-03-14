@@ -80,6 +80,7 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
     let ro: ResizeObserver | undefined;
     let mo: MutationObserver | undefined;
     let frame: number | undefined;
+    let roDebounce: ReturnType<typeof setTimeout> | undefined;
     let active: string | undefined;
     let dirty = true;
 
@@ -202,8 +203,14 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
         ro = undefined;
         if (CtorRO) {
             ro = new CtorRO(() => {
-                dirty = true;
-                schedule();
+                // Debounce resize callbacks — during streaming every message
+                // grows on each token, causing hundreds of resize events per
+                // second.  We only need to refresh offsets once the dust settles.
+                clearTimeout(roDebounce);
+                roDebounce = setTimeout(() => {
+                    dirty = true;
+                    schedule();
+                }, 100);
             });
             ro.observe(container);
             for (const element of nodes.values()) {
@@ -218,7 +225,10 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
                 dirty = true;
                 schedule();
             });
-            mo.observe(container, { subtree: true, childList: true, characterData: true });
+            // characterData: true would fire on every streamed character —
+            // structural changes (childList) are the only ones that affect
+            // turn positions.
+            mo.observe(container, { subtree: true, childList: true });
         }
 
         dirty = true;
@@ -292,6 +302,8 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
             caf(frame);
         }
         frame = undefined;
+        clearTimeout(roDebounce);
+        roDebounce = undefined;
         clear();
         io?.disconnect();
         ro?.disconnect();

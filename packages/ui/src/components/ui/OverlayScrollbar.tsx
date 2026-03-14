@@ -34,6 +34,7 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
   const [horizontal, setHorizontal] = React.useState<ThumbMetrics>({ length: 0, offset: 0 });
   const hideTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const frameRef = React.useRef<number | null>(null);
+  const metricsFrameRef = React.useRef<number | null>(null);
   const isDraggingRef = React.useRef(false);
   const lastUserIntentAtRef = React.useRef(0);
   const dragStartRef = React.useRef<{
@@ -141,7 +142,15 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
 
     const resizeObserver =
       typeof ResizeObserver !== "undefined"
-        ? new ResizeObserver(() => updateMetrics())
+        ? new ResizeObserver(() => {
+            // Coalesce resize events with rAF — during streaming every token
+            // can resize a message element, flooding the main thread.
+            if (metricsFrameRef.current !== null) cancelAnimationFrame(metricsFrameRef.current);
+            metricsFrameRef.current = requestAnimationFrame(() => {
+              metricsFrameRef.current = null;
+              updateMetrics();
+            });
+          })
         : null;
     resizeObserver?.observe(container);
 
@@ -149,7 +158,9 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
       observeMutations && typeof MutationObserver !== "undefined"
         ? new MutationObserver(() => updateMetrics())
         : null;
-    mutationObserver?.observe(container, { childList: true, subtree: true, characterData: true });
+    // characterData: true would fire on every streamed character, causing
+    // layout thrash.  Structural changes (childList) suffice for scroll metrics.
+    mutationObserver?.observe(container, { childList: true, subtree: true });
 
     return () => {
       container.removeEventListener("scroll", onScroll);
@@ -163,6 +174,7 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
       mutationObserver?.disconnect();
       if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
+      if (metricsFrameRef.current) cancelAnimationFrame(metricsFrameRef.current);
     };
   }, [containerRef, handleScroll, markUserIntent, observeMutations, updateMetrics, userIntentOnly]);
 

@@ -135,7 +135,8 @@ export const ScrollShadow = React.forwardRef<HTMLDivElement, ScrollShadowProps>(
         childList: true,
         subtree: true,
         attributes: true,
-        characterData: true,
+        // characterData: true omitted — firing on every streamed character
+        // would flood the rAF queue during message streaming.
       });
 
       return () => {

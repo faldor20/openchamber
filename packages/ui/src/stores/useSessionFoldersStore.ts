@@ -49,6 +49,10 @@ const safeStorage = getSafeStorage();
 let diskWriteTimer: ReturnType<typeof setTimeout> | null = null;
 let diskHydrated = false;
 let diskHydrationInFlight = false;
+let _persistFoldersTimer: ReturnType<typeof setTimeout> | undefined;
+let _persistCollapsedTimer: ReturnType<typeof setTimeout> | undefined;
+let _pendingFoldersMap: SessionFoldersMap | null = null;
+let _pendingCollapsedIds: Set<string> | null = null;
 
 const isVSCodeWebview = (): boolean => {
   if (typeof window === 'undefined') {
@@ -185,20 +189,51 @@ const readPersistedCollapsed = (): Set<string> => {
 };
 
 const persistFolders = (foldersMap: SessionFoldersMap): void => {
-  try {
-    safeStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(foldersMap));
-  } catch {
-    // ignored
-  }
+  _pendingFoldersMap = foldersMap;
+  clearTimeout(_persistFoldersTimer);
+  _persistFoldersTimer = setTimeout(() => {
+    _pendingFoldersMap = null;
+    try {
+      safeStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(foldersMap));
+    } catch {
+      // ignored
+    }
+  }, 300);
 };
 
 const persistCollapsed = (collapsedFolderIds: Set<string>): void => {
-  try {
-    safeStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify(Array.from(collapsedFolderIds)));
-  } catch {
-    // ignored
-  }
+  _pendingCollapsedIds = collapsedFolderIds;
+  clearTimeout(_persistCollapsedTimer);
+  _persistCollapsedTimer = setTimeout(() => {
+    _pendingCollapsedIds = null;
+    try {
+      safeStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify(Array.from(collapsedFolderIds)));
+    } catch {
+      // ignored
+    }
+  }, 300);
 };
+
+// Flush any pending debounced writes before the page unloads so folder state
+// is never silently lost on a quick tab close.
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    if (_pendingFoldersMap !== null) {
+      clearTimeout(_persistFoldersTimer);
+      try {
+        safeStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(_pendingFoldersMap));
+      } catch { /* ignored */ }
+      _pendingFoldersMap = null;
+    }
+    if (_pendingCollapsedIds !== null) {
+      clearTimeout(_persistCollapsedTimer);
+      try {
+        safeStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify(Array.from(_pendingCollapsedIds)));
+      } catch { /* ignored */ }
+      _pendingCollapsedIds = null;
+    }
+  });
+}
 
 const persistState = (foldersMap: SessionFoldersMap, collapsedFolderIds: Set<string>): void => {
   persistFolders(foldersMap);
