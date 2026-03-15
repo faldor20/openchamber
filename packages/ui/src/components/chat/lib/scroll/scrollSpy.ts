@@ -227,10 +227,21 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
                 dirty = true;
                 schedule();
             });
-            // characterData: true would fire on every streamed character —
-            // structural changes (childList) are the only ones that affect
-            // turn positions.
-            mo.observe(container, { subtree: true, childList: true });
+            // When ResizeObserver is available, we can limit ourselves to
+            // structural changes (childList) because element height changes
+            // are observed separately.
+            // As a fallback when ResizeObserver is not available, also observe
+            // characterData so that text-only growth still marks offsets dirty.
+            const moConfig: MutationObserverInit = {
+                subtree: true,
+                childList: true,
+            };
+            if (!CtorRO) {
+                moConfig.characterData = true;
+                // characterDataOldValue is optional but can help some debuggers.
+                moConfig.characterDataOldValue = false;
+            }
+            mo.observe(container, moConfig);
         }
 
         dirty = true;
