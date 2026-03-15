@@ -82,6 +82,8 @@ const readSessionSelectionMap = (): SessionSelectionMap => {
 
 let sessionSelectionCache: SessionSelectionMap | null = null;
 let loadSessionsRequestSeq = 0;
+let _persistSelectionTimer: ReturnType<typeof setTimeout> | undefined;
+let _pendingSelectionMap: SessionSelectionMap | null = null;
 
 type ProjectSessionResult = {
     projectId: string;
@@ -152,10 +154,29 @@ const getSessionSelectionMap = (): SessionSelectionMap => {
 
 const persistSessionSelectionMap = (map: SessionSelectionMap) => {
     sessionSelectionCache = map;
-    try {
-        safeStorage.setItem(SESSION_SELECTION_STORAGE_KEY, JSON.stringify(map));
-    } catch { /* ignored */ }
+    _pendingSelectionMap = map;
+    clearTimeout(_persistSelectionTimer);
+    _persistSelectionTimer = setTimeout(() => {
+        try {
+            safeStorage.setItem(SESSION_SELECTION_STORAGE_KEY, JSON.stringify(map));
+            _pendingSelectionMap = null;
+        } catch { /* ignored */ }
+    }, 300);
 };
+
+// Flush any pending debounced write before the page unloads so the latest
+// selection is never silently lost on a quick tab close.
+if (typeof window !== 'undefined') {
+    window.addEventListener('beforeunload', () => {
+        if (_pendingSelectionMap !== null) {
+            clearTimeout(_persistSelectionTimer);
+            try {
+                safeStorage.setItem(SESSION_SELECTION_STORAGE_KEY, JSON.stringify(_pendingSelectionMap));
+            } catch { /* ignored */ }
+            _pendingSelectionMap = null;
+        }
+    });
+}
 
 const getStoredSessionForDirectory = (directory: string | null | undefined): string | null => {
     if (!directory) {
@@ -1452,9 +1473,12 @@ export const useSessionStore = create<SessionStore>()(
                             mergedSession.directory !== existingSession.directory ||
                             mergedSession.version !== existingSession.version ||
                             mergedSession.projectID !== existingSession.projectID ||
-                            JSON.stringify(mergedSession.time) !== JSON.stringify(existingSession.time) ||
-                            JSON.stringify(mergedSession.summary ?? null) !== JSON.stringify(existingSession.summary ?? null) ||
-                            JSON.stringify(mergedSession.share ?? null) !== JSON.stringify(existingSession.share ?? null);
+                            // Short-circuit on reference equality — if metadata.time/summary/share
+                            // was undefined the merged value is the same object reference, so
+                            // JSON.stringify would always be equal.  Only stringify when refs differ.
+                            (mergedTime !== existingSession.time && JSON.stringify(mergedTime) !== JSON.stringify(existingSession.time)) ||
+                            (mergedSummary !== existingSession.summary && JSON.stringify(mergedSummary ?? null) !== JSON.stringify(existingSession.summary ?? null)) ||
+                            (mergedShare !== existingSession.share && JSON.stringify(mergedShare ?? null) !== JSON.stringify(existingSession.share ?? null));
 
                         const sessions = [...state.sessions];
                         sessions[index] = hasChanged ? mergedSession : existingSession;

@@ -34,6 +34,7 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
   const [horizontal, setHorizontal] = React.useState<ThumbMetrics>({ length: 0, offset: 0 });
   const hideTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const frameRef = React.useRef<number | null>(null);
+  const metricsFrameRef = React.useRef<number | null>(null);
   const isDraggingRef = React.useRef(false);
   const lastUserIntentAtRef = React.useRef(0);
   const dragStartRef = React.useRef<{
@@ -75,6 +76,14 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
       setHorizontal({ length: 0, offset: 0 });
     }
   }, [containerRef, minThumbSize, disableHorizontal]);
+
+  const scheduleMetricsUpdate = React.useCallback(() => {
+    if (metricsFrameRef.current !== null) return;
+    metricsFrameRef.current = requestAnimationFrame(() => {
+      metricsFrameRef.current = null;
+      updateMetrics();
+    });
+  }, [updateMetrics]);
 
   const scheduleHide = React.useCallback(() => {
     if (hideTimeoutRef.current) {
@@ -141,14 +150,20 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
 
     const resizeObserver =
       typeof ResizeObserver !== "undefined"
-        ? new ResizeObserver(() => updateMetrics())
+        ? new ResizeObserver(() => {
+            // Coalesce resize events with rAF — during streaming every token
+            // can resize a message element, flooding the main thread.
+            scheduleMetricsUpdate();
+          })
         : null;
     resizeObserver?.observe(container);
 
     const mutationObserver =
       observeMutations && typeof MutationObserver !== "undefined"
-        ? new MutationObserver(() => updateMetrics())
+        ? new MutationObserver(() => scheduleMetricsUpdate())
         : null;
+    // Keep characterData enabled so streamed text growth updates scrollHeight,
+    // but funnel every callback through the shared rAF gate above.
     mutationObserver?.observe(container, { childList: true, subtree: true, characterData: true });
 
     return () => {
@@ -163,8 +178,9 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
       mutationObserver?.disconnect();
       if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
+      if (metricsFrameRef.current) cancelAnimationFrame(metricsFrameRef.current);
     };
-  }, [containerRef, handleScroll, markUserIntent, observeMutations, updateMetrics, userIntentOnly]);
+  }, [containerRef, handleScroll, markUserIntent, observeMutations, scheduleMetricsUpdate, updateMetrics, userIntentOnly]);
 
   React.useEffect(() => {
     if (!suppressVisibility) {

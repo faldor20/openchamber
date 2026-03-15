@@ -80,6 +80,7 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
     let ro: ResizeObserver | undefined;
     let mo: MutationObserver | undefined;
     let frame: number | undefined;
+    let roDebounce: ReturnType<typeof setTimeout> | undefined;
     let active: string | undefined;
     let dirty = true;
 
@@ -198,12 +199,20 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
             }
         }
 
+        clearTimeout(roDebounce);
+        roDebounce = undefined;
         ro?.disconnect();
         ro = undefined;
         if (CtorRO) {
             ro = new CtorRO(() => {
-                dirty = true;
-                schedule();
+                // Debounce resize callbacks — during streaming every message
+                // grows on each token, causing hundreds of resize events per
+                // second.  We only need to refresh offsets once the dust settles.
+                clearTimeout(roDebounce);
+                roDebounce = setTimeout(() => {
+                    dirty = true;
+                    schedule();
+                }, 100);
             });
             ro.observe(container);
             for (const element of nodes.values()) {
@@ -218,7 +227,21 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
                 dirty = true;
                 schedule();
             });
-            mo.observe(container, { subtree: true, childList: true, characterData: true });
+            // When ResizeObserver is available, we can limit ourselves to
+            // structural changes (childList) because element height changes
+            // are observed separately.
+            // As a fallback when ResizeObserver is not available, also observe
+            // characterData so that text-only growth still marks offsets dirty.
+            const moConfig: MutationObserverInit = {
+                subtree: true,
+                childList: true,
+            };
+            if (!CtorRO) {
+                moConfig.characterData = true;
+                // characterDataOldValue is optional but can help some debuggers.
+                moConfig.characterDataOldValue = false;
+            }
+            mo.observe(container, moConfig);
         }
 
         dirty = true;
@@ -292,6 +315,8 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
             caf(frame);
         }
         frame = undefined;
+        clearTimeout(roDebounce);
+        roDebounce = undefined;
         clear();
         io?.disconnect();
         ro?.disconnect();

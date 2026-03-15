@@ -39,6 +39,26 @@ const openDatabase = (): Promise<IDBDatabase> => {
   });
 };
 
+// Cached promise so every read/write reuses the same connection instead of
+// paying the IndexedDB open cost (~5-50 ms) on every operation.
+let _dbPromise: Promise<IDBDatabase> | null = null;
+
+const getDatabase = (): Promise<IDBDatabase> => {
+  if (!_dbPromise) {
+    _dbPromise = openDatabase().then((db) => {
+      // Reset the cache if the connection is closed externally (e.g. browser
+      // upgrade, tab close) so the next call reopens it cleanly.
+      db.onclose = () => { _dbPromise = null; };
+      db.onversionchange = () => { db.close(); };
+      return db;
+    }).catch((err: unknown) => {
+      _dbPromise = null;
+      throw err;
+    });
+  }
+  return _dbPromise;
+};
+
 const readFallback = (): Record<string, CursorRecord> => {
   if (!isBrowser()) {
     return {};
@@ -77,7 +97,7 @@ export const saveSessionCursor = async (
 
   if (hasIndexedDbSupport()) {
     try {
-      const db = await openDatabase();
+      const db = await getDatabase();
       await new Promise<void>((resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readwrite');
         const store = tx.objectStore(STORE_NAME);
@@ -87,7 +107,6 @@ export const saveSessionCursor = async (
         tx.onerror = () => reject(tx.error ?? new Error('Cursor write failed'));
         tx.onabort = () => reject(tx.error ?? new Error('Cursor write aborted'));
       });
-      db.close();
       return;
     } catch { /* ignored */ }
   }
@@ -106,7 +125,7 @@ export const readSessionCursor = async (
 
   if (hasIndexedDbSupport()) {
     try {
-      const db = await openDatabase();
+      const db = await getDatabase();
       const record = await new Promise<CursorRecord | null>((resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readonly');
         const store = tx.objectStore(STORE_NAME);
@@ -120,7 +139,6 @@ export const readSessionCursor = async (
         tx.onerror = () => reject(tx.error ?? new Error('Cursor read failed'));
         tx.onabort = () => reject(tx.error ?? new Error('Cursor read aborted'));
       });
-      db.close();
       return record;
     } catch { /* ignored */ }
   }
@@ -136,7 +154,7 @@ export const clearSessionCursor = async (sessionId: string) => {
 
   if (hasIndexedDbSupport()) {
     try {
-      const db = await openDatabase();
+      const db = await getDatabase();
       await new Promise<void>((resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readwrite');
         const store = tx.objectStore(STORE_NAME);
@@ -145,7 +163,6 @@ export const clearSessionCursor = async (sessionId: string) => {
         tx.onerror = () => reject(tx.error ?? new Error('Cursor delete failed'));
         tx.onabort = () => reject(tx.error ?? new Error('Cursor delete aborted'));
       });
-      db.close();
     } catch { /* ignored */ }
   }
 
